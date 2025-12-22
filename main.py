@@ -56,10 +56,12 @@ class PointMarker(Drawable):
                     event.dict,
                     event.pos
                 )
-            self.push([30, event.pos, [
-                [[80,120, 80], 20],
-                [[160, 240, 160], 10]
-            ]])
+                ## TODO WHaTHHTHAH!!??!?!?!?
+                self.push([30, event.pos, [
+                    [[80,120, 80], 20],
+                    [[160, 240, 160], 10]
+                ]])
+                ## TODO WHaTHHTHAH!!??!?!?!?
     @override
     def draw(self, game: Game):
         for circle in self.point_list[:]:
@@ -91,8 +93,10 @@ def predictions(predictor, marker, game):
         return
 
     features = clicks[-8:-2]
-    label = clicks[-2]
-    output = predictor([features])
+    label = clicks[-2:]
+    #output = predictor([features])
+    prediction = predictor.train(features, label)
+    print(f"prediction:{prediction}")
 
 class NNPredictor(nn.Module):
     def __init__(self, game):
@@ -115,15 +119,10 @@ class NNPredictor(nn.Module):
             torch.nn.Linear(16, 16),
             torch.nn.ReLU(),
             torch.nn.Linear(16, 2),
-            torch.nn.Tanh(),
+            torch.nn.Sigmoid(),
         )
-        ## TODO DO THE DECODER
-        ## TODO DO THE DECODER
-        self.decoder = None
-        ## TODO DO THE DECODER
-        ## TODO DO THE DECODER
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3),
-        self.loss = torch.nn.MSELoss(),
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3)
+        self.loss = torch.nn.MSELoss()
 
     def encoder(self, features):
         features = torch.as_tensor(features, dtype=torch.float32)
@@ -132,32 +131,42 @@ class NNPredictor(nn.Module):
         features = features.reshape(-1)
         return features
 
-    def decode(self, output):
+    def decoder(self, output):
         output = output.reshape(-1, 2)
         output = output * self.normalization
         output = output.reshape(-1)
         return output
 
     def forward(self, features):
-        ## Encoding Step
-        print(f"BEFORE: {features}")
         features = self.encoder(features)
-        print(f"AFTER: {features}")
         output = self.model(features)
-        print(f"OUTPUT: {output}")
-        decoded = self.decode(output)
-        print(f"DECODED: {decoded}")
+        decoded = self.decoder(output)
         return decoded
-        #output = self.model(features)
-        ## TODO
-        ## TODO  decode = output.....
-        ## TODO
-        ## TODO
-        #return output
 
     def train(self, features, labels):
-        pass
-        
+        output = self.forward(features)
+        labels = torch.as_tensor(labels, dtype=torch.float32)
+        print(f"output: {output}")
+        print(f"labels: {labels}")
+        print(f"features: {features}")
+        loss = self.loss(output, labels)
+        print(f"loss: {loss}")
+
+        loss.backward()
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        return output
+        ## TODO 
+        ## TODO 
+        ## TODO 
+        ## TODO dispaly where AI thinks next click will be
+        ## TODO  increase learn rate
+        ## TODO 
+        ## TODO 
+        ## TODO 
+        ## TODO 
+        ## TODO 
+        #return [0,0]
         
 
 def main():
