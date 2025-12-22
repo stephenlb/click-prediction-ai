@@ -97,7 +97,18 @@ def predictions(predictor, marker, game):
 class NNPredictor(nn.Module):
     def __init__(self, game):
         super().__init__()
+        ## TODO use GPU??!?!?!?!?
+        ## TODO use GPU??!?!?!?!?
+        self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
+        ## TODO use GPU??!?!?!?!?
+        ## TODO use GPU??!?!?!?!?
+        print(f"Accelerator devices is: {self.device}")
+        print(f"Game Width and Height{[game.window.width, game.window.height]}")
         self.clicks = 0
+        self.register_buffer(
+            'normalization',
+             torch.as_tensor([game.window.width, game.window.height])
+        )
         self.model = torch.nn.Sequential(
             torch.nn.Linear(6, 16),
             torch.nn.ReLU(),
@@ -106,31 +117,37 @@ class NNPredictor(nn.Module):
             torch.nn.Linear(16, 2),
             torch.nn.Tanh(),
         )
-        self.encoder = v2.Compose([
-            #v2.Lambda(lambda coords: [coords[0] / 900, coords[1] / 500, coords[2] / 900, coords[3] / 500, coords[4] / 900, coords[5] / 500]),
-            #v2.ToTensor(),
-            v2.Lambda(lambda x: torch.as_tensor(x, dtype=torch.float32)),
-
-            ### TODO FIX THIS!!!!!
-            ### TODO FIX THIS!!!!!
-            v2.Lambda(lambda x, y: coords.view(-1,2).div(
-                torch.tensor([game.window.width, game.window.height])
-            ).reshape(-1)),
-            ### TODO FIX THIS!!!!!
-            ### TODO FIX THIS!!!!!
-
-            #v2.Lambda(lambda x: x+1),
-            ## TODO FLATEN
-        ])
+        ## TODO DO THE DECODER
+        ## TODO DO THE DECODER
+        self.decoder = None
+        ## TODO DO THE DECODER
+        ## TODO DO THE DECODER
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3),
         self.loss = torch.nn.MSELoss(),
+
+    def encoder(self, features):
+        features = torch.as_tensor(features, dtype=torch.float32)
+        features = features.reshape(-1, 2)
+        features = features / self.normalization
+        features = features.reshape(-1)
+        return features
+
+    def decode(self, output):
+        output = output.reshape(-1, 2)
+        output = output * self.normalization
+        output = output.reshape(-1)
+        return output
 
     def forward(self, features):
         ## Encoding Step
         print(f"BEFORE: {features}")
         features = self.encoder(features)
-
         print(f"AFTER: {features}")
+        output = self.model(features)
+        print(f"OUTPUT: {output}")
+        decoded = self.decode(output)
+        print(f"DECODED: {decoded}")
+        return decoded
         #output = self.model(features)
         ## TODO
         ## TODO  decode = output.....
