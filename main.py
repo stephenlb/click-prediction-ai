@@ -57,12 +57,10 @@ class PointMarker(Drawable):
                     event.dict,
                     event.pos
                 )
-                ## TODO WHaTHHTHAH!!??!?!?!?
                 self.push([30, event.pos, [
                     [[80,120, 80], 20],
                     [[160, 240, 160], 10]
                 ]])
-                ## TODO WHaTHHTHAH!!??!?!?!?
     @override
     def draw(self, game: Game):
         for circle in self.point_list[:]:
@@ -102,12 +100,8 @@ def predictions(predictor, marker, game):
 class NNPredictor(nn.Module):
     def __init__(self, game):
         super().__init__()
-        ## TODO use GPU??!?!?!?!?
-        ## TODO use GPU??!?!?!?!?
         self.game = game
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-        ## TODO use GPU??!?!?!?!?
-        ## TODO use GPU??!?!?!?!?
         print(f"Accelerator devices is: {self.device}")
         print(f"Game Width and Height{[game.window.width, game.window.height]}")
         self.clicks = 0
@@ -165,14 +159,6 @@ class NNPredictor(nn.Module):
         self.optimizer.step()
         self.optimizer.zero_grad()
         return output
-        ## TODO 
-        ## TODO dispaly where AI thinks next click will be
-        ## TODO  increase learn rate
-        ## TODO 
-        ## TODO use Torch Optimzer for graph collapes
-        ## TODO 
-        ## TODO 
-        ## TODO 
         
 
 def main():
