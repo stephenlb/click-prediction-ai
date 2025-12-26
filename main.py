@@ -192,19 +192,18 @@ def draw_heatmap(game):
     ## TODO remove ai_history
     coords = game.ai
     size = (game.window.width, game.window.height)
-
-    #for i in range(10):
-    surface = pygame.Surface((40,40), pygame.SRCALPHA) 
-    surface.fill((255, 255, 255))
-    game.draw.circle(
-        surface,
-        (255,228,10,0),
-        #(25 * i, 25 * i, 2 * i, 128),
-        (20,20),
-        20 #- (2 * i)
-    )
-    #game.heatmap.blit(surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-    game.window.screen.blit(surface, (coords[0]+20, coords[1]+20), special_flags=pygame.BLEND_RGBA_MULT)
+    surface = pygame.Surface(size, pygame.SRCALPHA) 
+    surface.fill((255, 255, 255, 255))
+    for i in range(4):
+        game.draw.circle(
+            surface,
+            (255,253,253),
+            #(255 - 10 * i, 255 -  10 * i, 255 -  10* i, 255 -  10* i),
+            coords,
+            (4 * i)
+        )
+        game.heatmap.blit(surface, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+    game.window.screen.blit(game.heatmap, (0,0))#, special_flags=pygame.BLEND_RGB_MULT)
 
 def main():
     frame = 0
@@ -231,6 +230,7 @@ def main():
         window=Window(width=size[0], height=size[1]),
         clock=pygame.time.Clock()
     )
+    game.heatmap.fill((255, 255, 255))
     game.window.screen = pygame.display.set_mode(size, pygame.SRCALPHA)
     predictor = NNPredictor(game)
     background = pygame.Surface(size)
