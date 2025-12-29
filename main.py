@@ -144,9 +144,9 @@ class NNPredictor(nn.Module):
             nn.Conv2d(6, 16, 5),
             nn.ReLU(),
             #nn.MaxPool2d(2, 2),
-            nn.MaxPool2d(4, 4),
+            nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            nn.Linear(1650, 32),
+            nn.Linear(105600, 32),
             nn.ReLU(),
             nn.Linear(32, 16),
             nn.ReLU(),
@@ -169,6 +169,7 @@ class NNPredictor(nn.Module):
 
     def loss(self, output, labels):
         print("output",output)
+        print("labels",labels)
         return torch.mean(torch.abs(output - labels).pow(0.5))
         #return ((labels - output) ** 2).mean()
 
@@ -180,11 +181,11 @@ class NNPredictor(nn.Module):
         ## TODO can be smaller input
         width = game.window.width
         height = game.window.height
-        output = torch.zeros(1, width, height) 
+        output = torch.zeros(1, 1, width, height) 
         for pos in range(0, len(coords), 2):
             x = coords[pos]
             y = coords[pos+1]
-            output[0, x, y] = 1.0
+            output[0, 0, x, y] = 1.0
         return output
 
     def encoder(self, features):
