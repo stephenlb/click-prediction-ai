@@ -81,6 +81,50 @@ class DebugValue(nn.Module):
             print(self._prefix(), "unsupported type:", type(x))
         return x
 
+
+class ContextConv(nn.Module):
+    def __init__(self, in_ch, out_ch, k=5):
+        super().__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, k, padding="same")
+        # self.act = nn.LeakyReLU(0.01)
+        self.act = nn.ReLU()
+        # self.act = nn.LogSoftmax()#smooth is nicer for more placticity
+
+
+    def forward(self, x):
+        y = self.conv(x)
+        y = self.act(y)
+
+        # channel pooling
+        maxvals = y.max(dim=1, keepdim=True).values    # (B,1,H,W)
+        first = y[:, 0:1, :, :] + maxvals             # updated channel 0
+        rest  = y[:, 1:, :, :]                        # untouched channels
+
+        out = torch.cat([first, rest], dim=1)         # (B,C,H,W)
+        return out
+
+
+class SampleSpace(nn.Module):
+    def forward(self, x):
+        # x: (B, C, H, W)
+        B, C, H, W = x.shape
+        device = x.device
+
+        # spatial softmax
+        probs = torch.softmax(x.view(B, C, -1), dim=-1).view(B, C, H, W)
+
+        # coordinate grids
+        ys = torch.arange(H, device=device).float() / (H - 1)
+        xs = torch.arange(W, device=device).float() / (W - 1)
+
+        grid_x = xs.view(1, 1, 1, W).expand(B, C, H, W)
+        grid_y = ys.view(1, 1, H, 1).expand(B, C, H, W)
+
+        ex = (probs * grid_x).sum(dim=(2, 3))  # expected x in [0,1]
+        ey = (probs * grid_y).sum(dim=(2, 3))  # expected y in [0,1]
+
+        return torch.stack([ex, ey], dim=-1)    # (B, C, 2)
+
 def fade_color(color, factor):
     return [max(0, int(c * factor)) for c in color]
 
@@ -176,6 +220,7 @@ def predictions(predictor, marker, game):
     print(f"prediction:{prediction}")
 
 class NNPredictor(nn.Module):
+
     def __init__(self, game):
         super(NNPredictor, self).__init__()
         self.inputLength = 6
@@ -192,22 +237,20 @@ class NNPredictor(nn.Module):
         ## Neva said LSTM first, give it 3 guesses instaed of 1
         self.model = torch.nn.Sequential(
             ## TODO change input for CNN
-            nn.Conv2d(1, 6, 5),
-            nn.ReLU(),
-            nn.MaxPool2d(4, 4),
-            nn.Conv2d(6, 16, 5),
-            nn.ReLU(),
-            #nn.MaxPool2d(2, 2),
-            nn.MaxPool2d(2, 2),
+            ContextConv(1,5,15),
+            # ContextConv(5,5,4),
+            ContextConv(5,8,15),
+            SampleSpace(),
             nn.Flatten(),
-            nn.Linear(105600, 32),
-            nn.ReLU(),
-            nn.Linear(32, 16),
-            nn.ReLU(),
-            nn.Linear(16, 2),
-            # DebugValue()
-            # nn.Sigmoid(),
+            nn.Linear(16,32),
+            # nn.Dropout(0.2),
+            nn.Softmin(),#avoids weird shooting behiviors
+            nn.Linear(32,32),
+            nn.Softmin(),
+            nn.Linear(32,2),
+            nn.Sigmoid(),
         )
+
         self.to(self.device)
         #self.model = torch.nn.Sequential(
         #    nn.Linear(6, 8),
@@ -224,6 +267,17 @@ class NNPredictor(nn.Module):
         self.loss = self.loss
         self.losses = []
 
+    ## RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d,
+    ## but got input of size: [6]
+    def forward(self, features):
+        #features = self.encoder(features)
+        print('features: ', features)
+        features = self.encoderCNN(features, self.game)
+        print('features Post encoderCNN: ', features)
+        output = self.model(features)
+        decoded = self.decoder(output)
+        return decoded
+
     def loss(self, output, labels):
         print("output",output)
         # print("labels",labels)
@@ -239,11 +293,12 @@ class NNPredictor(nn.Module):
         width = game.window.width
         height = game.window.height
         # Encode as [batch, x, y, channel] so channels stay last while marking click positions
-        output = torch.zeros(1, width, height, 1, device=self.device)
+        output = torch.zeros(1,1, width, height,device=self.device)
         for pos in range(0, len(coords), 2):
             x = coords[pos]
             y = coords[pos+1]
-            output[0, x, y, 0] = 1.0
+            i =(len(coords)-pos)/2
+            output[0,0, x, y] = 0.5 ** i #decay
         return output
 
     def encoder(self, features):
@@ -270,20 +325,6 @@ class NNPredictor(nn.Module):
         output = output * self.normalization
         output = output.reshape(-1)
         return output
-
-    ## RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d,
-    ## but got input of size: [6]
-
-    def forward(self, features):
-        #features = self.encoder(features)
-        print('features: ', features)
-        features = self.encoderCNN(features, self.game)
-        print('features Post encoderCNN: ', features)
-        #features = self.encoderCNN(features)
-        features = features.permute(0, 3, 1, 2)
-        output = self.model(features)
-        decoded = self.decoder(output)
-        return decoded
 
     def train(self, features, labels):
         output = self.forward(features)
