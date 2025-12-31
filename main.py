@@ -9,6 +9,8 @@ import torch
 from torch import nn
 from torchvision.transforms import v2
 
+import math
+
 ### TODO Batching
 ### TODO more than one training epoch
 ### TODO Shuffling
@@ -153,155 +155,254 @@ class PointMarker(Drawable):
             if circle[0] <= 0:
                 self.point_list.remove(circle)
 
+
 def predictions(predictor, marker, game):
     clicks = marker.ai_point_list
     numberCoords = len(clicks)
 
-    ## Only run AI when user clicks
+    # only run AI when new click happens
     if predictor.clicks >= numberCoords:
         return
 
-    ## Set number of clicks so we don't run next frame again
     predictor.clicks = numberCoords
 
-    ## Only allow AI to run if we have enough data samples
-    if numberCoords < predictor.inputLength + 2:
+    need = predictor.inputLength + 2
+    if numberCoords < need:
         return
 
-    ## TODO add more xy coords
-    ## TODO add more xy coords
-    features = clicks[-predictor.inputLength - 2:-2]
-    label = clicks[-2:]
-    prediction = predictor.train([features], [label])
-    print(f"prediction:{prediction}")
+    features_batch = []
+    labels_batch = []
+
+    # Slide backward in steps of 2 (xy pair)
+    for end in range(numberCoords, 0, -2):
+        start_features = end - predictor.inputLength - 2
+        start_label    = end - 2
+
+        if start_features < 0:
+            break
+
+        f = clicks[start_features:start_label]
+        l = clicks[start_label:end]
+
+        if len(f) != predictor.inputLength:
+            continue
+        if len(l) != 2:
+            continue
+
+        features_batch.append(f)
+        labels_batch.append(l)
+
+        if len(features_batch) >= 128:
+            break
+
+    if not features_batch:
+        return
+
+    features_batch.reverse()
+    labels_batch.reverse()
+
+    # ---- TRAIN ----
+    predictor.fit_batch(features_batch, labels_batch)
+
+    # ---- PREDICT (deterministic, dropout disabled) ----
+    latest_features = features_batch[-1]
+    prediction = predictor.predict([latest_features])
+
+    print(f"prediction: {prediction}")
+
+class SkipNet(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+
+        # stage 1
+        self.block1 = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Dropout()
+        )
+
+        # stage 2
+        self.block2 = nn.Sequential(
+            nn.Linear(128, 16),
+            nn.ReLU(),
+            nn.Dropout()
+        )
+
+        concat_dim = input_dim + 128 + 16
+
+        self.head = nn.Sequential(
+            nn.Linear(concat_dim, 2),
+            # nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        h1 = self.block1(x)     # [B, 128]
+        h2 = self.block2(h1)    # [B, 16]
+
+        cat = torch.cat([x, h1, h2], dim=-1)
+
+        return self.head(cat)
+
+
+
 
 class NNPredictor(nn.Module):
     def __init__(self, game):
-        super(NNPredictor, self).__init__()
-        self.inputLength = 6
+        super().__init__()
+
         self.game = game
-        self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-        print(f"Accelerator devices is: {self.device}")
-        print(f"Game Width and Height{[game.window.width, game.window.height]}")
+        self.inputLength = 6
         self.clicks = 0
+
+        self.device = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
+        print("device:", self.device)
+
         self.register_buffer(
-            'normalization',
-             torch.as_tensor([game.window.width, game.window.height], dtype=torch.float32)
+            "normalization",
+            torch.as_tensor(
+                [game.window.width, game.window.height],
+                dtype=torch.float32
+            )
         )
-        ## Neva said to use CNN + also maybe LSTM in front?!?!?!
-        ## Neva said LSTM first, give it 3 guesses instaed of 1
-        self.model = torch.nn.Sequential(
-            ## TODO change input for CNN
-            nn.Conv2d(1, 6, 5),
-            nn.ReLU(),
-            nn.MaxPool2d(4, 4),
-            nn.Conv2d(6, 16, 5),
-            nn.ReLU(),
-            #nn.MaxPool2d(2, 2),
-            nn.MaxPool2d(2, 2),
-            nn.Flatten(),
-            nn.Linear(384, 32),
-            nn.ReLU(),
-            nn.Linear(32, 16),
-            nn.ReLU(),
-            nn.Linear(16, 2),
-            # DebugValue()
-            # nn.Sigmoid(),
-        )
-        self.to(self.device)
-        #self.model = torch.nn.Sequential(
-        #    nn.Linear(6, 8),
-        #    nn.ReLU(),
-        #    nn.Linear(8, 8),
-        #    nn.ReLU(),
-        #    nn.Linear(8, 2),
-        #    nn.Sigmoid(),
-        #)
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-1)
-        #self.optimizer.param_groups[0]['weight_decay'] = 0.1
-        #self.loss = torch.nn.MSELoss()
-        #self.loss = torch.nn.L1Loss()
-        self.loss = self.loss
+
+        input_dim = self.inputLength
+
+        self.model = SkipNet(input_dim)
+
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=1e-2)
         self.losses = []
 
+        self.to(self.device)
+
     def loss(self, output, labels):
-        #print("output",output)
-        # print("labels",labels)
         return torch.mean(torch.abs(output - labels).pow(0.5))
-        #return ((labels - output) ** 2).mean()
 
-    ## TODO render the output
-    ## TODO render the output
-    ## TODO render the output
-    ## TODO render the output
-    def encoderCNN(self, features, game):
-        width = game.window.width   // 10
-        height = game.window.height // 10
-        outputs = []
-        # Encode as [batch, x, y, channel] so channels stay last while marking click positions
-        for coords in features:
+    def forward(self, x):
+        return self.model(x)
 
-            ## Generate Click Positions on the Canvas
-            image = torch.zeros(width, height, 1, device=self.device)
-            for pos in range(0, len(coords), 2):
-                x = coords[pos]   // 10
-                y = coords[pos+1] // 10
-                image[x, y, 0] = 1.0
+    def add_gradient_noise(self, std=1e-5):
+        with torch.no_grad():
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    p.grad.add_(torch.randn_like(p.grad) * std)
 
-            outputs.append(image)
+    # -------------------------------------------------
+    # FIT BATCH (training mode)
+    # -------------------------------------------------
+    def fit_batch(
+        self,
+        features,
+        labels,
+        train_full=32,   # phase 1 steps
+        train_end=16,     # phase 2 steps
+        end_size=8       # refined subset size
+    ):
+        self.model.train()
 
-        images = torch.stack(tuple(outputs)) 
-        print("images:", images.size())
-        return images
+        x = torch.as_tensor(features, dtype=torch.float32, device=self.device)
+        y = torch.as_tensor(labels, dtype=torch.float32, device=self.device)
 
-    def encoderOLD(self, features):
-        features = torch.as_tensor(features, dtype=torch.float32)
-        features = features.reshape(-1, 2)
-        features = features / self.normalization
-        features = features.reshape(-1)
-        return features
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+        if y.dim() == 1:
+            y = y.unsqueeze(0)
 
-    def decoder(self, output):
-        output = output.reshape(-1, 2)
-        output = output * self.normalization
-        output = output.reshape(-1)
-        return output
+        B = x.size(0)
 
-    ## RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d,
-    ## but got input of size: [6]
+        # -------------------------------
+        # LR schedule across BOTH phases
+        # -------------------------------
+        total_steps = train_full + train_end
+        lr_start = 1e-2
+        lr_end   = 1e-3
 
-    def forward(self, features):
-        #features = self.encoder(features)
-        print('features: ', features)
-        features = self.encoderCNN(features, self.game)
-        print('features Size: ', features.size())
-        #print('features Post encoderCNN: ', features)
-        #features = self.encoderCNN(features)
-        features = features.permute(0, 3, 1, 2)
-        output = self.model(features)
-        decoded = self.decoder(output[0])
-        return decoded
+        step_index = 0
 
-    def train(self, features, labels):
-        output = self.forward(features)
-        labels = torch.as_tensor(labels, dtype=torch.float32, device=self.device)
-        loss = self.loss(output, labels)
-        self.losses.append(loss)
-        cost = sum(self.losses) / len(self.losses)
-        print(f"loss: {loss}")
-        print(f"cost: {cost}")
+        # ===============================
+        # Phase 1 — FULL batch
+        # ===============================
+        for _ in range(train_full):
+            t = step_index / (total_steps - 1)
+            lr = lr_end + 0.5 * (lr_start - lr_end) * (1 + math.cos(math.pi * t))
 
-        coords = output.detach().cpu().numpy()
-        print(f"coords: {(coords[0], coords[1])}")
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = lr
 
-        ## Set AI Prediction Pixel XY Coords
+            self.optimizer.zero_grad()
+
+            pred = self.forward(x)
+            loss = self.loss(pred, y)
+
+            self.losses.append(loss.detach())
+            loss.backward()
+            self.add_gradient_noise()
+            self.optimizer.step()
+
+            step_index += 1
+
+        # ===============================
+        # Phase 2 — SMALL refined subset
+        # ===============================
+        # take the most recent `end_size` samples (or all if smaller)
+        k = min(end_size, B)
+        xs = x[-k:]
+        ys = y[-k:]
+
+        for _ in range(train_end):
+            t = step_index / (total_steps - 1)
+            lr = lr_end + 0.5 * (lr_start - lr_end) * (1 + math.cos(math.pi * t))
+
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = lr
+
+            self.optimizer.zero_grad()
+
+            pred = self.forward(xs)
+            loss = self.loss(pred, ys)
+
+            self.losses.append(loss.detach())
+            loss.backward()
+            self.add_gradient_noise()
+            self.optimizer.step()
+
+            step_index += 1
+
+        avg = sum(self.losses) / len(self.losses)
+
+        print(
+            f"loss: {loss.item():.4f}  "
+            f"avg: {avg:.4f}  "
+            f"lr_final: {lr:.6f}  "
+            f"phase2_batch: {k}"
+        )
+
+
+
+    # -------------------------------------------------
+    # PREDICT (dropout OFF)
+    # -------------------------------------------------
+    def predict(self, features):
+        self.model.eval()     # <-- disables dropout
+
+        with torch.no_grad():
+            x = torch.as_tensor(features, dtype=torch.float32, device=self.device)
+
+            if x.dim() == 1:
+                x = x.unsqueeze(0)
+
+            pred = self.forward(x)
+
+        coords = pred[0].detach().cpu().numpy()
+
         self.game.ai = [int(coords[0]), int(coords[1])]
-        self.game.ai_history.append([int(coords[0]), int(coords[1])])
+        self.game.ai_history.append(self.game.ai)
 
-        loss.backward()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-        return output
+        return pred
+
         
 def draw_heatmap(game):
     ## TODO remove ai_history
