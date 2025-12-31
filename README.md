@@ -1,7 +1,7 @@
 # click prediction
 
 this code is originally something steven did on stream and I had time so i played with it a lot.
-the graphics is not by me but the prediction 
+the graphics is not by me but the prediction is
 
 I am gona do my best to explain the thought process for what is happening.
 note that this is vibe coded 😅 (gpt5.2 chat client) i really did not mean for this to get as much attention as it did 
